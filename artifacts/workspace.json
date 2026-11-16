@@ -1,0 +1,17 @@
+{
+  "root": "/home/dev/feedback/uid22486",
+  "B": "/home/dev/feedback/uid22486",
+  "sha": "11cb574cda0a5540ab7e36aa9b43679dc02c5788",
+  "wslDistro": "Ubuntu-26.04",
+  "source": {
+    "owner": "firmadyne",
+    "repo": "firmadyne",
+    "sha": "11cb574cda0a5540ab7e36aa9b43679dc02c5788"
+  },
+  "fork": {
+    "owner": "Rrr119",
+    "repo": "firmadyne",
+    "cloneUrl": "https://github.com/Rrr119/firmadyne.git"
+  },
+  "at": "2026-11-16T04:20:27.170Z"
+}

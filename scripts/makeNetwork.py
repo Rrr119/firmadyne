@@ -33,6 +33,9 @@ KERNEL=`get_kernel ${ARCHEND}`
 QEMU=`get_qemu ${ARCHEND}`
 QEMU_MACHINE=`get_qemu_machine ${ARCHEND}`
 QEMU_ROOTFS=`get_qemu_disk ${ARCHEND}`
+QEMU_CPU=`get_qemu_cpu ${ARCHEND}`
+QEMU_NET_DEVICE=`get_qemu_net_device ${ARCHEND}`
+QEMU_CONSOLE=`get_qemu_console ${ARCHEND}`
 WORK_DIR=`get_scratch ${IID}`
 
 %(START_NET)s
@@ -47,8 +50,8 @@ trap cleanup EXIT
 echo "Starting firmware emulation... use Ctrl-a + x to exit"
 sleep 1s
 
-%(QEMU_ENV_VARS)s ${QEMU} -m 256 -M ${QEMU_MACHINE} -kernel ${KERNEL} \\
-    %(QEMU_DISK)s -append "root=${QEMU_ROOTFS} console=ttyS0 nandsim.parts=64,64,64,64,64,64,64,64,64,64 rdinit=/firmadyne/preInit.sh rw debug ignore_loglevel print-fatal-signals=1 user_debug=31 firmadyne.syscall=0" \\
+%(QEMU_ENV_VARS)s ${QEMU} -m 256 -M ${QEMU_MACHINE} %(QEMU_CPU_ARG)s -kernel ${KERNEL} \\
+    %(QEMU_DISK)s -append "root=${QEMU_ROOTFS} console=${QEMU_CONSOLE}%(APPEND_EXTRA)s nandsim.parts=64,64,64,64,64,64,64,64,64,64 rdinit=/firmadyne/preInit.sh rw debug ignore_loglevel print-fatal-signals=1 firmadyne.syscall=0" \\
     -nographic \\
     %(QEMU_NETWORK)s | tee ${WORK_DIR}/qemu.final.serial.log
 """
@@ -133,16 +136,23 @@ def ifaceNo(dev):
     g = re.match(r"[^0-9]+([0-9]+)", dev)
     return int(g.group(1)) if g else -1
 
+# Architectures whose guest kernel relies on virtio devices. Everything else
+# (MIPS Malta and the x86 'pc' machine) uses the emulated Intel e1000 NIC.
+VIRTIO_ARCHS = ("arm", "arm64")
+
+def useVirtio(arch):
+    return arch in VIRTIO_ARCHS
+
 def qemuArchNetworkConfig(i, arch, n):
     if not n:
-        if arch == "arm":
+        if useVirtio(arch):
             return "-device virtio-net-device,netdev=net%(I)i -netdev socket,id=net%(I)i,listen=:200%(I)i" % {'I': i}
         else:
             return "-netdev socket,id=net%(I)i,listen=:200%(I)i -device e1000,netdev=net%(I)i" % {'I': i}
     else:
         (ip, dev, vlan, mac) = n
          # newer kernels use virtio only
-        if arch == "arm":
+        if useVirtio(arch):
             return "-device virtio-net-device,netdev=nettap%(I)i -netdev tap,id=nettap%(I)i,ifname=${TAPDEV_%(I)i},script=no" % {'I': i}
         else:
             vlan_id = vlan if vlan else i
@@ -270,21 +280,33 @@ sudo tunctl -d ${TAPDEV_%(I)i}
     return '\n'.join(output)
 
 def qemuCmd(iid, network, arch, endianness):
-    if arch == "mips":
+    if arch in ("mips", "mips64"):
         qemuEnvVars = ""
         qemuDisk = "-drive if=ide,format=raw,file=${IMAGE}"
         if endianness != "eb" and endianness != "el":
             raise Exception("You didn't specify a valid endianness")
-    elif arch == "arm":
+    elif arch in ("arm", "arm64"):
         qemuDisk = "-drive if=none,file=${IMAGE},format=raw,id=rootfs -device virtio-blk-device,drive=rootfs"
         if endianness == "el":
             qemuEnvVars = "QEMU_AUDIO_DRV=none"
         elif endianness == "eb":
-            raise Exception("armeb currently not supported")
+            raise Exception("%seb currently not supported" % arch)
         else:
             raise Exception("You didn't specify a valid endianness")
+    elif arch in ("intel", "intel64"):
+        # Older router kernels often ship without virtio drivers, so the x86
+        # 'pc' machine uses an IDE disk and the emulated e1000 NIC.
+        qemuEnvVars = ""
+        qemuDisk = "-drive if=ide,format=raw,file=${IMAGE}"
+        if endianness != "el":
+            raise Exception("x86 firmware is little-endian, expected 'el'")
     else:
         raise Exception("Unsupported architecture")
+
+    # The aarch64 'virt' machine requires an explicit CPU model.
+    qemuCpuArg = "-cpu ${QEMU_CPU}" if arch == "arm64" else ""
+    # user_debug is an ARM/ARM64-specific kernel parameter.
+    appendExtra = " user_debug=31" if arch in ("arm", "arm64") else ""
 
     return QEMUCMDTEMPLATE % {'IID': iid,
                               'ARCHEND' : arch + endianness,
@@ -292,7 +314,9 @@ def qemuCmd(iid, network, arch, endianness):
                               'STOP_NET' : stopNetwork(network),
                               'QEMU_DISK' : qemuDisk,
                               'QEMU_NETWORK' : qemuNetworkConfig(arch, network),
-                              'QEMU_ENV_VARS' : qemuEnvVars}
+                              'QEMU_ENV_VARS' : qemuEnvVars,
+                              'QEMU_CPU_ARG' : qemuCpuArg,
+                              'APPEND_EXTRA' : appendExtra}
 
 def process(infile, iid, arch, endianness=None, makeQemuCmd=False, outfile=None):
     brifs = []
@@ -381,7 +405,7 @@ def main():
             (arch, endianness) = archEnd(v)
 
     if not arch or not endianness:
-        raise Exception("Either arch or endianness not found try mipsel/mipseb/armel/armeb")
+        raise Exception("Either arch or endianness not found; try one of armel/arm64el/mipseb/mipsel/mips64eb/mips64el/intelel/intel64el")
 
     if not infile and iid:
         infile = "%s/%i/qemu.initial.serial.log" % (SCRATCHDIR, iid)

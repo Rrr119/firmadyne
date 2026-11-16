@@ -36,7 +36,7 @@ else
     ARCH="${ARCH#"${ARCH%%[![:space:]]*}"}"
     echo "${ARCH}"
     if [ -z "${ARCH}" ]; then
-        echo "Error: Unable to lookup architecture. Please specify {armel,mipseb,mipsel} as the second argument!"
+        echo "Error: Unable to lookup architecture. Please specify one of {armel,arm64el,mipseb,mipsel,mips64eb,mips64el,intelel,intel64el} as the second argument!"
         exit 1
     fi
 fi

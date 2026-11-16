@@ -2,8 +2,15 @@ firmadyne.config
 
 *.o
 *.armel
+*.arm64el
 *.mipseb
 *.mipsel
+*.mips64eb
+*.mips64el
+*.intelel
+*.intel64el
 binaries/
 images/
 scratch/
+__pycache__/
+*.pyc

@@ -23,6 +23,7 @@
 - [Database](#database-1)
   - [Data](#data)
   - [Schema](#schema)
+- [Tests](#tests)
 - [Paper](#paper)
 
 # Introduction
@@ -119,8 +120,52 @@ To use [QEMU](http://wiki.qemu.org/Main_Page) provided by your distribution:
 
 * `sudo apt-get install qemu-system-arm qemu-system-mips qemu-system-x86 qemu-utils`
 
-Note that emulation of x86-based firmware is not currently supported, but installing
-`qemu-system-x86` resolves a packaging issue on certain Debian-based distributions.
+The Debian/Ubuntu QEMU packages bundle several emulators each, so the single
+command above provides every `qemu-system-*` binary used by this framework:
+
+* `qemu-system-arm` provides `qemu-system-arm` and `qemu-system-aarch64`
+* `qemu-system-mips` provides `qemu-system-mips`, `qemu-system-mipsel`,
+  `qemu-system-mips64`, and `qemu-system-mips64el`
+* `qemu-system-x86` provides `qemu-system-i386` and `qemu-system-x86_64`
+
+### Supported architectures
+
+`getArch.sh` identifies the architecture from userspace binaries (and records
+any detected kernel version in the `image.kernel_version` column), while the
+launch scripts in `scripts/` drive QEMU using the per-architecture settings in
+`firmadyne.config`.
+
+| Identifier  | `file(1)` family                  | QEMU binary            | Machine | Disk (`root=`) | NIC    | Console |
+| ----------- | --------------------------------- | ---------------------- | ------- | -------------- | ------ | ------- |
+| `armel`     | 32-bit ARM, little-endian         | `qemu-system-arm`      | `virt`  | `/dev/vda1`    | virtio | `ttyS0` |
+| `arm64el`   | AArch64 / ARM64, little-endian    | `qemu-system-aarch64`  | `virt`  | `/dev/vda1`    | virtio | `ttyAMA0` |
+| `mipseb`    | 32-bit MIPS, big-endian           | `qemu-system-mips`     | `malta` | `/dev/sda1`    | e1000  | `ttyS0` |
+| `mipsel`    | 32-bit MIPS, little-endian        | `qemu-system-mipsel`   | `malta` | `/dev/sda1`    | e1000  | `ttyS0` |
+| `mips64eb`  | 64-bit MIPS, big-endian           | `qemu-system-mips64`   | `malta` | `/dev/sda1`    | e1000  | `ttyS0` |
+| `mips64el`  | 64-bit MIPS, little-endian (N64)  | `qemu-system-mips64el` | `malta` | `/dev/sda1`    | e1000  | `ttyS0` |
+| `intelel`   | 32-bit x86 (Intel 80386)          | `qemu-system-i386`     | `pc`    | `/dev/sda1`    | e1000  | `ttyS0` |
+| `intel64el` | 64-bit x86 (x86-64)               | `qemu-system-x86_64`   | `pc`    | `/dev/sda1`    | e1000  | `ttyS0` |
+
+Notes:
+
+* Every identifier is `<arch>` plus an endianness suffix (`el`/`eb`).
+  AArch64 and x86 are fixed little-endian, so `getArch.sh` appends `el` even
+  when the `file(1)` output has no explicit `LSB` marker.
+* The aarch64 `virt` machine has no default CPU, so the scripts pass
+  `-cpu cortex-a57`; its UART is an AMBA PL011 exposed as `ttyAMA0`.
+* The x86 `pc` machine and the MIPS `malta` machine use an IDE disk and the
+  emulated Intel e1000 NIC, because many router kernels lack virtio drivers.
+  The ARM `virt` machines use virtio block and network devices.
+* Each architecture needs a matching kernel plus `console`/`libnvram` binaries
+  under `binaries/` (see [Binaries](#binaries)). Their expected file names are
+  listed in `binaries/README.md`.
+* PowerPC (`ppc`/`ppc64`) is recognised by `getArch.sh` and stored in the
+  database, but no QEMU launch configuration is shipped yet; such images exit
+  with a clear "not supported" indication. `armeb` is likewise detected but
+  unsupported.
+* Adding another architecture only requires extending the `get_*` case
+  statements in `firmadyne.config`, the detection helpers in `getArch.sh`, and
+  (for the network inference path) `scripts/makeNetwork.py`.
 
 Alternatively, use our [modified version](https://github.com/firmadyne/qemu-linaro)
 of [qemu-linaro](https://git.linaro.org/?p=qemu/qemu-linaro.git) for certain
@@ -341,6 +386,17 @@ Below are descriptions of tables in the schema.
 | version      | Version string                 |
 | build        | Build string                   |
 | date         | Release date                   |
+
+# Tests
+
+A dependency-free test suite for the multi-architecture handling lives in
+[`tests/`](tests/README.md). It checks architecture/endianness detection,
+kernel-version extraction, the per-architecture QEMU mappings in
+`firmadyne.config`, and the network/launch script generation in
+`makeNetwork.py`. The tests run without QEMU, PostgreSQL, root, or a firmware
+image:
+
+* `./tests/run_tests.sh`
 
 # Paper
 
