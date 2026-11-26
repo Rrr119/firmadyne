@@ -35,6 +35,20 @@ QEMU_MACHINE=`get_qemu_machine ${ARCHEND}`
 QEMU_ROOTFS=`get_qemu_disk ${ARCHEND}`
 WORK_DIR=`get_scratch ${IID}`
 
+# Foreground mode is unchanged from the original workflow: QEMU owns the
+# terminal (-nographic) and the serial log is mirrored via tee.
+# Setting FIRMADYNE_DAEMON=1 detaches QEMU from the terminal and exposes
+# Unix-domain sockets for automated health checks and interactive attach:
+#   console.sock - first serial port (ttyS0): boot log and login prompt
+#   shell.sock   - second serial port (ttyS1): firmadyne root shell
+#   monitor.sock - QEMU monitor, attach with scripts/console.sh --monitor
+if [ "${FIRMADYNE_DAEMON:-0}" = "1" ]; then
+    rm -f ${WORK_DIR}/console.sock ${WORK_DIR}/shell.sock ${WORK_DIR}/monitor.sock
+    QEMU_CONSOLE_ARGS="-chardev socket,id=char0,path=${WORK_DIR}/console.sock,server=on,wait=off,logfile=${WORK_DIR}/qemu.final.serial.log -serial chardev:char0 -chardev socket,id=char1,path=${WORK_DIR}/shell.sock,server=on,wait=off -serial chardev:char1 -monitor unix:${WORK_DIR}/monitor.sock,server=on,wait=off -display none"
+else
+    QEMU_CONSOLE_ARGS="-nographic"
+fi
+
 %(START_NET)s
 
 function cleanup {
@@ -47,10 +61,18 @@ trap cleanup EXIT
 echo "Starting firmware emulation... use Ctrl-a + x to exit"
 sleep 1s
 
-%(QEMU_ENV_VARS)s ${QEMU} -m 256 -M ${QEMU_MACHINE} -kernel ${KERNEL} \\
-    %(QEMU_DISK)s -append "root=${QEMU_ROOTFS} console=ttyS0 nandsim.parts=64,64,64,64,64,64,64,64,64,64 rdinit=/firmadyne/preInit.sh rw debug ignore_loglevel print-fatal-signals=1 user_debug=31 firmadyne.syscall=0" \\
-    -nographic \\
-    %(QEMU_NETWORK)s | tee ${WORK_DIR}/qemu.final.serial.log
+if [ "${FIRMADYNE_DAEMON:-0}" = "1" ]; then
+    # Detached: serial traffic is captured by the chardev logfile directly.
+    %(QEMU_ENV_VARS)s ${QEMU} -m 256 -M ${QEMU_MACHINE} -kernel ${KERNEL} \\
+        %(QEMU_DISK)s -append "root=${QEMU_ROOTFS} console=ttyS0 nandsim.parts=64,64,64,64,64,64,64,64,64,64 rdinit=/firmadyne/preInit.sh rw debug ignore_loglevel print-fatal-signals=1 user_debug=31 firmadyne.syscall=0" \\
+        %(QEMU_NETWORK)s ${QEMU_CONSOLE_ARGS}
+else
+    # Foreground (original behavior): QEMU owns the terminal and tee mirrors
+    # the serial log to scratch/<IID>/qemu.final.serial.log.
+    %(QEMU_ENV_VARS)s ${QEMU} -m 256 -M ${QEMU_MACHINE} -kernel ${KERNEL} \\
+        %(QEMU_DISK)s -append "root=${QEMU_ROOTFS} console=ttyS0 nandsim.parts=64,64,64,64,64,64,64,64,64,64 rdinit=/firmadyne/preInit.sh rw debug ignore_loglevel print-fatal-signals=1 user_debug=31 firmadyne.syscall=0" \\
+        %(QEMU_NETWORK)s ${QEMU_CONSOLE_ARGS} | tee ${WORK_DIR}/qemu.final.serial.log
+fi
 """
 
 def stripTimestamps(data):
@@ -292,7 +314,8 @@ def qemuCmd(iid, network, arch, endianness):
                               'STOP_NET' : stopNetwork(network),
                               'QEMU_DISK' : qemuDisk,
                               'QEMU_NETWORK' : qemuNetworkConfig(arch, network),
-                              'QEMU_ENV_VARS' : qemuEnvVars}
+                              'QEMU_ENV_VARS' : qemuEnvVars,
+                              'QEMU_CONSOLE_ARGS' : '${QEMU_CONSOLE_ARGS}'}
 
 def process(infile, iid, arch, endianness=None, makeQemuCmd=False, outfile=None):
     brifs = []

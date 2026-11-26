@@ -25,5 +25,9 @@ set -e
 echo "Detecting network configuration"
 ./scripts/inferNetwork.sh 1
 
-echo "Booting..."
-./scratch/1/run.sh
+echo "Booting with automated health check (daemon mode)..."
+# Replaces the plain "./scratch/1/run.sh" invocation: boots the firmware,
+# waits for services, and exits non-zero with the stuck boot stage if the
+# emulation fails. Drop "--daemon" for the original foreground experience,
+# or attach later with: ./scripts/console.sh 1
+./scripts/emulate.sh 1 --daemon

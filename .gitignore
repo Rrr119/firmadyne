@@ -7,3 +7,5 @@ firmadyne.config
 binaries/
 images/
 scratch/
+__pycache__/
+*.pyc
